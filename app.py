@@ -2,11 +2,11 @@ import streamlit as st
 import math
 
 # 設定網頁標題
-st.title("🏗️ 建築工程工期估算系統")
-st.markdown("請在下方輸入基地條件與施工方式，系統將自動推算預估工期。")
+st.title("🏗️ 建築工程工期估算系統 (台北市加強版)")
+st.markdown("本系統已整合台北市施工前置作業列管時間，請選擇相關條件進行估算。")
 
-# --- 1. 建立輸入介面 (側邊欄或主畫面) ---
-st.header("1. 基本資料輸入")
+# --- 1. 建立輸入介面 ---
+st.header("1. 基地條件與前置作業")
 
 col1, col2 = st.columns(2)
 
@@ -16,17 +16,29 @@ with col1:
         ["住宅大樓", "辦公大樓", "百貨商場", "醫院", "科技廠房"]
     )
     
+    # 新增的前置作業下拉選項
+    prep_status = st.selectbox(
+        "前置作業列管項目",
+        [
+            "一般案件 (約120天)", 
+            "鄰近捷運禁限建範圍 (需影響評估)", 
+            "基地含受保護樹木 (需移植審議)", 
+            "大型開發案 (需交通維持計畫審查)",
+            "複雜案件 (捷運+樹保+交維)"
+        ]
+    )
+
     structure_type = st.selectbox(
         "結構型式",
         ["RC (鋼筋混凝土)", "SRC (鋼骨鋼筋混凝土)", "SS/SC (純鋼骨結構)"]
     )
 
+with col2:
     construction_method = st.selectbox(
         "施工方式 (地下室)",
         ["順打工法", "逆打工法", "雙順打工法"]
     )
-
-with col2:
+    
     excavation_method = st.selectbox(
         "開挖/擋土型式",
         ["連續壁工法", "島式開挖", "明挖 (放坡)", "鋼板樁"]
@@ -45,97 +57,95 @@ with col3:
 with col4:
     site_area = st.number_input("基地面積 (坪)", min_value=10.0, value=500.0)
 
-# --- 3. 計算邏輯核心 (這裡是您需要根據專業經驗調整的地方) ---
+# --- 3. 計算邏輯核心 ---
 
 def calculate_duration():
     total_days = 0
-    breakdown = {} # 用來儲存細項
+    breakdown = {}
 
-    # A. 前置與拆除
-    prep_days = 30 # 假設基本動員30天
+    # A. 前置作業時間 (依據您的需求新增)
+    if prep_status == "一般案件 (約120天)":
+        prep_base = 120
+    elif prep_status == "鄰近捷運禁限建範圍 (需影響評估)":
+        prep_base = 210  # 增加捷運會審與現況調查時間
+    elif prep_status == "基地含受保護樹木 (需移植審議)":
+        prep_base = 240  # 台北市樹保審議時程較長
+    elif prep_status == "大型開發案 (需交通維持計畫審查)":
+        prep_base = 180  # 含交維審查與會勘
+    else: # 複雜案件
+        prep_base = 300  # 多項列管併行之行政折衝
+
+    # 若有舊建物需拆除，再加計拆除工期
+    demolition_days = 0
     if site_condition == "有舊建物 (需拆除)":
-        prep_days += 60 # 假設拆除需60天
+        demolition_days = 60
     elif site_condition == "有舊基礎 (需拔樁/破除)":
-        prep_days += 90
+        demolition_days = 90
     
-    total_days += prep_days
-    breakdown['前置與拆除'] = prep_days
+    total_days += (prep_base + demolition_days)
+    breakdown['前置作業 (含行政審查)'] = prep_base
+    if demolition_days > 0:
+        breakdown['舊建物拆除/基礎處理'] = demolition_days
 
-    # B. 基礎與地下室工程 (每層所需天數 * 層數 * 工法係數)
-    # 假設基礎單層開挖+支撐+結構平均天數
+    # B. 地下室工程
     base_days_per_floor = 45 
-    
-    # 工法修正
     if construction_method == "逆打工法":
-        # 逆打地下室通常較慢，但可與地上層重疊
         base_days_per_floor = 60 
-    elif excavation_method == "明挖 (放坡)":
-        base_days_per_floor = 35 # 較快
-
-    basement_days = base_days_per_floor * floors_below
     
-    # 連續壁施作時間 (粗估：周長相關，這裡簡化用面積與層數估算)
+    basement_days = base_days_per_floor * floors_below
     if excavation_method == "連續壁工法":
-        wall_days = 60 + (floors_below * 10) # 假設
+        wall_days = 60 + (floors_below * 10)
         basement_days += wall_days
 
     total_days += basement_days
-    breakdown['地下室結構'] = basement_days
+    breakdown['地下室結構工程'] = basement_days
 
     # C. 地上結構工程
-    # 定義標準層天數
     if "RC" in structure_type:
         days_per_floor = 18
     elif "SRC" in structure_type:
         days_per_floor = 14
-    else: # SS/SC
+    else:
         days_per_floor = 10
     
     structure_days = days_per_floor * floors_above
 
-    # 若為逆打，地上結構與地下結構部分重疊 (假設重疊 70% 的地下室時間)
+    # 逆打工期重疊計算
     if construction_method == "逆打工法":
         overlap = min(structure_days, basement_days * 0.7)
         total_days -= overlap
         breakdown['逆打工期重疊扣減'] = -int(overlap)
 
     total_days += structure_days
-    breakdown['地上結構'] = structure_days
+    breakdown['地上結構工程'] = structure_days
 
-    # D. 裝修與機電 (根據建物類型加權)
-    finish_days = floors_above * 15 # 基本裝修
+    # D. 裝修與機電 (扣除重疊進場時間)
+    finish_days = floors_above * 15
+    factor = {"醫院": 1.5, "百貨商場": 1.3, "科技廠房": 0.8, "住宅大樓": 1.0, "辦公大樓": 1.1}
+    finish_total = int(finish_days * factor.get(building_type, 1.0))
     
-    factor = 1.0
-    if building_type == "醫院":
-        factor = 1.5 # 系統複雜
-    elif building_type == "百貨商場":
-        factor = 1.3
-    elif building_type == "科技廠房":
-        factor = 0.8 # 系統化安裝
-    
-    finish_total = int(finish_days * factor)
-    
-    # 裝修通常在結構體完成一半後進場 (重疊施工)
     finish_overlap = structure_days * 0.5
-    finish_net = finish_total - finish_overlap
-    if finish_net < 0: finish_net = 0 # 不可能小於0
+    finish_net = max(0, finish_total - finish_overlap)
 
     total_days += finish_net
-    breakdown['裝修機電 (扣除重疊)'] = int(finish_net)
+    breakdown['內裝機電 (扣除重疊期)'] = int(finish_net)
 
     return int(total_days), breakdown
 
 # --- 4. 輸出結果 ---
 st.markdown("---")
-if st.button("開始計算工期"):
+if st.button("🚀 開始計算預估工期"):
     estimated_days, details = calculate_duration()
     estimated_months = round(estimated_days / 30, 1)
 
-    st.success(f"### 🚩 預估總工期：約 {estimated_days} 日歷天 ({estimated_months} 個月)")
+    st.success(f"### 🚩 預估總工期：約 {estimated_days} 日歷天 (約 {estimated_months} 個月)")
     
     # 顯示詳細計算項目
-    st.write("#### 工期分析明細：")
+    st.write("#### 工期組成明細分析：")
     for key, value in details.items():
-        st.write(f"- **{key}**: {value} 天")
+        if value < 0:
+            st.write(f"🟢 **{key}**: {value} 天 (工期優化)")
+        else:
+            st.write(f"- {key}: {value} 天")
 
-    st.info("註：此結果包含天候與休假係數之粗略估算，實際工期需依排程網圖 (CPM) 為準。")
+    st.warning("⚠️ 提醒：台北市各項審議時間受限於各局處委員會時程，實際申報開工日請以核定公文為準。")
