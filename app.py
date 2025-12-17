@@ -126,3 +126,45 @@ def calculate_duration():
     details['消檢及取得使照'] = admin_days
 
     base_total_days = sum(details.values())
+    
+    if use_date_calc:
+        if exclude_sunday:
+            sunday_extra = base_total_days // 6
+            details['週日停工修正'] = int(sunday_extra)
+        if exclude_cny:
+            cny_years = math.ceil((base_total_days + (base_total_days//6 if exclude_sunday else 0)) / 365)
+            details['春節假期修正'] = cny_years * 7
+
+    return sum(details.values()), details
+
+# --- 4. 結果呈現 ---
+if submit_button:
+    total_days, breakdown = calculate_duration()
+    
+    st.markdown("### 📊 估算結果摘要")
+    res_col1, res_col2, res_col3 = st.columns(3)
+    
+    with res_col1:
+        st.metric("總預估日曆天", f"{total_days} 天")
+    with res_col2:
+        st.metric("約合月份", f"{round(total_days/30, 1)} 個月")
+    with res_col3:
+        if use_date_calc:
+            finish_date = start_date + timedelta(days=total_days)
+            st.metric("預計完工日期", finish_date.strftime('%Y/%m/%d'))
+        else:
+            st.metric("時間週期", "未指定日期")
+
+    # 真實明細清單
+    st.markdown("#### 📝 工期組成明細表")
+    for k, v in breakdown.items():
+        color = "#2E7D32" if v < 0 else "#263238"
+        symbol = "▼" if v < 0 else "•"
+        st.markdown(f"""
+            <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px solid #EEE; color: {color};">
+                <span>{symbol} {k}</span>
+                <span>{v} 天</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+st.markdown('<p class="warning-text">⚠️ WARNING: 本估算結果僅供前期評估參考，實際工期需依詳細施工計畫網圖為準。</p>', unsafe_allow_html=True)
